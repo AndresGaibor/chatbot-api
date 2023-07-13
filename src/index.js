@@ -1,6 +1,9 @@
 require("dotenv").config();
+const cors = require("cors");
 const express = require("express");
 const app = express();
+
+app.use(cors());
 const morgan = require("morgan");
 
 const { createClient } = require("@supabase/supabase-js");
@@ -31,25 +34,30 @@ const replicateKey = process.env.REPLICATE_KEY;
 
 const replicate = new Replicate({ auth: replicateKey });
 
-const TEMA = "Discos duros de estado solido SSD y discos duros mecanicos HDD";
+const TEMA = "Discos duros SSD y HDD";
 
 async function relacionado(prompt) {
+  console.log("buscando relacion con ", prompt);
   const pregunta = `la oracion "${prompt}" tiene relacion con "${TEMA}"? Responde solo "si" o "no"`;
 
   const output = await replicate.run(MODELO, {
     input: {
       prompt: pregunta,
-      max_length: 50,
+      max_length: 500,
+      temperature: 1,
     },
   });
-
-  if (output.join("").toLowerCase() === "si") {
+  const respuesta = output.join("");
+  console.log("respuesta de relacion ", respuesta);
+  if (respuesta.toLowerCase().includes("si")) {
     return true;
   }
   return false;
 }
 
 async function preguntar(prompt) {
+  console.log("preguntando ", prompt);
+
   const output = await replicate.run(MODELO, {
     input: { prompt, max_length: 100 },
   });
@@ -64,9 +72,13 @@ const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function guardarPregunta(pagina, pregunta, respuesta) {
-  let { data } = await supabase
+  console.log("guardando pregunta ", pagina, pregunta, respuesta);
+  let { data, error } = await supabase
     .from("preguntas")
-    .insert([{ pagina, pregunta, respuesta }]);
+    .insert([{ pagina, pregunta, respuesta }])
+    .select();
+
+  console.log("guardar pregunta ", data, error);
   return data;
 }
 
@@ -76,31 +88,37 @@ app.get("/api/preguntar", async (req, res) => {
   try {
     const { pregunta, pagina } = req.query;
 
-    let respuesta = "";
-    let relacion;
-    let error = false;
+    let error;
 
     if (procesando) {
-      error = true;
-      respuesta = "Estoy procesando otra pregunta, intenta mas tarde";
+      error = "Estoy procesando otra pregunta, intenta mas tarde";
+
+      res.json({
+        pregunta,
+        error,
+      });
+      return;
     }
 
-    if (!procesando) {
-      procesando = true;
-      relacion = await relacionado(pregunta);
-      procesando = false;
+    procesando = true;
+
+    const relacion = await relacionado(pregunta);
+
+    if (!relacion) {
+      error = "No tengo relacion con el tema, intenta con otra pregunta";
+
+      res.json({
+        pregunta,
+        relacion,
+        error,
+      });
+      return;
     }
 
-    if (relacion && !procesando) {
-      procesando = true;
-      respuesta = await preguntar(pregunta);
-      procesando = false;
+    const respuesta = await preguntar(pregunta);
 
-      if (respuesta.length > 0) {
-        procesando = true;
-        await guardarPregunta(pagina, pregunta, respuesta);
-        procesando = false;
-      }
+    if (respuesta.length > 0) {
+      await guardarPregunta(pagina, pregunta, respuesta);
     }
 
     res.json({
