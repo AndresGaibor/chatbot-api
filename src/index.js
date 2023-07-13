@@ -3,6 +3,8 @@ const express = require("express");
 const app = express();
 const morgan = require("morgan");
 
+const { createClient } = require("@supabase/supabase-js");
+
 const Replicate = require("replicate");
 
 //Configuraciones
@@ -54,11 +56,25 @@ async function preguntar(prompt) {
   return output.join("");
 }
 
+const supabaseUrl = "https://bgaysluggolvjnozqzep.supabase.co";
+
+// eslint-disable-next-line no-undef
+const supabaseKey = process.env.SUPABASE_KEY;
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+async function guardarPregunta(pagina, pregunta, respuesta) {
+  let { data } = await supabase
+    .from("preguntas")
+    .insert([{ pagina, pregunta, respuesta }]);
+  return data;
+}
+
 let procesando = false;
 
 app.get("/api/preguntar", async (req, res) => {
   try {
-    const { pregunta } = req.query;
+    const { pregunta, pagina } = req.query;
 
     let respuesta = "";
     let relacion;
@@ -72,11 +88,19 @@ app.get("/api/preguntar", async (req, res) => {
     if (!procesando) {
       procesando = true;
       relacion = await relacionado(pregunta);
+      procesando = false;
     }
 
     if (relacion && !procesando) {
       procesando = true;
       respuesta = await preguntar(pregunta);
+      procesando = false;
+
+      if (respuesta.length > 0) {
+        procesando = true;
+        await guardarPregunta(pagina, pregunta, respuesta);
+        procesando = false;
+      }
     }
 
     res.json({
