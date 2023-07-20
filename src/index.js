@@ -5,6 +5,7 @@ const cors = require("cors");
 const express = require("express");
 const app = express();
 
+const playwright = require("playwright");
 app.use(cors());
 const morgan = require("morgan");
 
@@ -149,6 +150,104 @@ app.get("/api/preguntar", async (req, res) => {
     });
   } finally {
     procesando = false;
+  }
+});
+
+async function scraping(tipo = "HDD", precio_max = -1, formFactor = "PC") {
+  const { chromium } = playwright;
+  // await chromium.connect(
+  //   "wss://chrome.browserless.io?token=d3ab5e61-8531-4892-ae3a-1279c64ecc69"
+  // );
+
+  const launchOptions = {
+    headless: false,
+  };
+
+  const browser = await chromium.launch(launchOptions);
+
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  let url = `https://www.amazon.com/s?k=disco+duro+${tipo}`;
+
+  if (formFactor != "PC") {
+    url += "+2.5";
+  }
+
+  if (precio_max != -1) {
+    url += `&rh=p_36%3A-${precio_max}00`;
+  }
+  await page.goto(url);
+
+  const productList = await page.$(".s-result-list.s-search-results");
+  if (productList == null) {
+    return [];
+  }
+
+  const products = await productList?.$$eval("[data-asin]", (all_products) => {
+    const data = [];
+
+    all_products.slice(2).forEach((product) => {
+      const spans = product.querySelectorAll("span");
+      // if span incluye Patrocinado
+      const dataAsin = product.getAttribute("data-asin");
+      const title = product.querySelector(
+        ".s-title-instructions-style > h2"
+      )?.innerText;
+
+      if (title == null) {
+        return;
+      }
+
+      if (
+        ["externo", "externos", "externa", "externas", "external"].some(
+          (word) => title?.toLowerCase().includes(word)
+        )
+      ) {
+        return;
+      }
+
+      const price = product.querySelector(".a-price-whole")?.innerText?.trim();
+      const image = product.querySelector("img")?.getAttribute("src");
+      let link = product.querySelector(".a-link-normal")?.getAttribute("href");
+
+      if (link.length > 10) {
+        link = `https://www.amazon.com${link}`;
+      }
+
+      data.push({
+        title,
+        price,
+        image,
+        link,
+      });
+
+      console.log(title, dataAsin, price, image);
+    });
+
+    // solo quiero los 5 primeros
+    return data.slice(0, 5);
+  });
+  await browser.close();
+
+  return products;
+}
+
+// scraping("HDD", 40, "Laptop");
+
+app.get("/api/recomendacion", async (req, res) => {
+  try {
+    const { precio_max, tipo, formFactor } = req.query;
+    const productos = await scraping(tipo, precio_max, formFactor);
+
+    res.json({
+      productos,
+    });
+  } catch (error) {
+    console.error("Ocurrió un error en la solicitud:", error);
+    res.status(500).json({
+      error:
+        "Ocurrió un error en la solicitud. Por favor, intenta de nuevo más tarde.",
+    });
   }
 });
 
