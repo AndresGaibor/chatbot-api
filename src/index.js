@@ -199,9 +199,15 @@ async function scraping(tipo = "HDD", precio_max = -1, formFactor = "PC") {
       }
 
       if (
-        ["externo", "externos", "externa", "externas", "external"].some(
-          (word) => title?.toLowerCase().includes(word)
-        )
+        [
+          "externo",
+          "externos",
+          "externa",
+          "externas",
+          "external",
+          "nvme",
+          "m.2",
+        ].some((word) => title?.toLowerCase().includes(word))
       ) {
         return;
       }
